@@ -12,7 +12,11 @@ app = FastAPI(title="Sistem Pelacakan Alumni Publik")
 # 1. Konfigurasi CORS (Penting untuk Vue + Vite)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    # allow_origins=["*"], 
+     allow_origins=[
+        "http://localhost:5173",
+        "https://alumni-tracker-feprod.up.railway.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
