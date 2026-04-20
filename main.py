@@ -17,7 +17,8 @@ app.add_middleware(
     # allow_origins=["*"], 
     allow_origins=[
         "http://localhost:5173",
-        "https://alumni-tracker-feprod.up.railway.app"
+        "https://alumni-tracker-feprod.up.railway.app",
+        "https://tracker-alumni.up.railway.app"
     ],
     allow_credentials=True,
     allow_methods=["*"],
