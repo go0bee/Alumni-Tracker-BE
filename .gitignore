@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Database (Jika ada file db lokal)
+*.sqlite3
+
+# Environment (Sudah kamu masukkan)
+.env
+
+# Tool Specific (Sudah kamu masukkan)
+.zencoder
+.zenflow
+
+# OS
+.DS_Store (untuk Mac)
+Thumbs.db (untuk Windows)

@@ -24,3 +24,15 @@ class TrackingEvidence(Base):
     raw_data_url = Column(Text, nullable=True)
     snippet_content = Column(Text, nullable=True)
     extracted_score = Column(Float, default=0.0, nullable=True)
+
+class Alumni(Base):
+    __tablename__ = "alumni"
+
+    id = Column(Integer, primary_key=True, index=True)
+    nim = Column(String(50), unique=True, index=True, nullable=False)
+
+    nama = Column(String(200), nullable=False)
+    tahun_masuk = Column(Integer, nullable=True)
+    tanggal_lulus = Column(String(50), nullable=True)  # biar fleksibel (excel kadang format aneh)
+    fakultas = Column(String(200), nullable=True)
+    program_studi = Column(String(200), nullable=True)

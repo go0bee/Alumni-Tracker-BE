@@ -6,3 +6,7 @@ python-dotenv
 httpx
 beautifulsoup4
 pymysql
+python-multipart
+pandas
+openpyxl
+cryptography

@@ -6,17 +6,18 @@ from datetime import datetime
 import models
 import db
 import scrapper
+from import_excel import router as import_router
 
 app = FastAPI(title="Sistem Pelacakan Alumni Publik")
+app.include_router(import_router)
 
-# 1. Konfigurasi CORS (Penting untuk Vue + Vite)
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=["*"], 
-     allow_origins=[
-        "http://localhost:5173",
-        "https://alumni-tracker-feprod.up.railway.app"
-    ],
+    allow_origins=["*"], 
+    #  allow_origins=[
+    #     "http://localhost:5173",
+    #     "https://alumni-tracker-feprod.up.railway.app"
+    # ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -207,6 +208,57 @@ def delete_evidence(evidence_id: int, db_session: Session = Depends(db.get_db)):
         db_session.commit()
         
     return {"message": "Bukti berhasil dihapus"}
+
+@app.post("/track/start")
+async def start_tracking_all(db_session: Session = Depends(db.get_db)):
+    """
+    Menjalankan tracking otomatis untuk semua alumni_targets.
+    Ini cocok setelah import Excel atau input massal.
+    """
+
+    targets = db_session.query(models.AlumniTarget).all()
+
+    if not targets:
+        raise HTTPException(status_code=404, detail="Tidak ada target alumni")
+
+    tracked = 0
+    updated = 0
+
+    for target in targets:
+        # jalankan scraper untuk setiap target
+        result = await scrapper.run_scraper_logic(
+            target.id,
+            target.nama_asli,
+            target.keywords
+        )
+
+        target.status = result["status"]
+        target.confidence_score = result["score"]
+        target.last_run = datetime.now()
+
+        candidates = result.get("data", [])
+        if candidates:
+            for candidate in candidates:
+                evidence = models.TrackingEvidence(
+                    target_id=target.id,
+                    source_name="Social Media Search",
+                    raw_data_url=candidate.get("link"),
+                    snippet_content=candidate.get("snippet"),
+                    extracted_score=candidate.get("score", 0.0)
+                )
+                db_session.add(evidence)
+
+        tracked += 1
+        updated += len(candidates)
+
+    db_session.commit()
+
+    return {
+        "message": "Tracking semua alumni selesai",
+        "total_targets": len(targets),
+        "tracked": tracked,
+        "total_evidence_added": updated
+    }
 
 if __name__ == "__main__":
     import uvicorn
