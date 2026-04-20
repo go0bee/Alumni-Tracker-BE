@@ -8,6 +8,7 @@ import models
 import db
 import scrapper
 from import_excel import router as import_router
+from starlette.middleware.base import BaseHTTPMiddleware
 
 app = FastAPI(title="Sistem Pelacakan Alumni Publik")
 app.include_router(import_router)
@@ -40,6 +41,14 @@ class EvidenceCreate(BaseModel):
     extracted_score: float
 
 # --- ENDPOINTS ---
+@app.middleware("http")
+async def fix_https_proxy(request, call_next):
+    # Cek header dari Railway proxy
+    proto = request.headers.get("x-forwarded-proto")
+    if proto == "https":
+        # Paksa scheme request menjadi https agar tidak terjadi redirect ke http
+        request.scope["scheme"] = "https"
+    return await call_next(request)
 
 @app.post("/targets/")
 def create_target(data: AlumniCreate, db_session: Session = Depends(db.get_db)):
