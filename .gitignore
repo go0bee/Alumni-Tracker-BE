@@ -5,7 +5,7 @@ __pycache__/
 .venv/
 venv/
 ENV/
-
+__pycache__/
 # Database (Jika ada file db lokal)
 *.sqlite3
 

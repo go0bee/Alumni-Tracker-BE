@@ -8,19 +8,19 @@ import models
 import db
 import scrapper
 from import_excel import router as import_router
-from starlette.middleware.base import BaseHTTPMiddleware
+# from starlette.middleware.base import BaseHTTPMiddleware
 
 app = FastAPI(title="Sistem Pelacakan Alumni Publik")
 app.include_router(import_router)
 
 app.add_middleware(
     CORSMiddleware,
-    # allow_origins=["*"], 
-    allow_origins=[
-        "http://localhost:5173",
-        "https://alumni-tracker-feprod.up.railway.app",
-        "https://tracker-alumni.up.railway.app"
-    ],
+    allow_origins=["*"], 
+    # allow_origins=[
+    #     "http://localhost:5173",
+    #     "https://alumni-tracker-feprod.up.railway.app",
+    #     "https://tracker-alumni.up.railway.app"
+    # ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,14 +41,14 @@ class EvidenceCreate(BaseModel):
     extracted_score: float
 
 # --- ENDPOINTS ---
-@app.middleware("http")
-async def fix_https_proxy(request, call_next):
-    # Cek header dari Railway proxy
-    proto = request.headers.get("x-forwarded-proto")
-    if proto == "https":
-        # Paksa scheme request menjadi https agar tidak terjadi redirect ke http
-        request.scope["scheme"] = "https"
-    return await call_next(request)
+# @app.middleware("http")
+# async def fix_https_proxy(request, call_next):
+#     # Cek header dari Railway proxy
+#     proto = request.headers.get("x-forwarded-proto")
+#     if proto == "https":
+#         # Paksa scheme request menjadi https agar tidak terjadi redirect ke http
+#         request.scope["scheme"] = "https"
+#     return await call_next(request)
 
 @app.post("/targets/")
 def create_target(data: AlumniCreate, db_session: Session = Depends(db.get_db)):
@@ -90,7 +90,7 @@ def update_target(target_id: int, data: AlumniCreate, db_session: Session = Depe
     if not target:
         raise HTTPException(status_code=404, detail="Alumni tidak ditemukan")
 
-    target.nama_asli = data.nama
+    target.nama = data.nama
     target.keywords = data.keywords
     nama_split = data.nama.split()
     if len(nama_split) > 1:
@@ -115,102 +115,117 @@ def delete_target(target_id: int, db_session: Session = Depends(db.get_db)):
 
 @app.get("/track/{target_id}")
 async def run_tracking(target_id: int, db_session: Session = Depends(db.get_db)):
-    target = db_session.query(models.AlumniTarget).filter(models.AlumniTarget.id == target_id).first()
-    
+    target = db_session.query(models.Alumni).filter(models.Alumni.id == target_id).first()
+
     if not target:
         raise HTTPException(status_code=404, detail="Alumni tidak ditemukan")
-    
-    # 1. Jalankan Scraper (Menggunakan nama 'scraper_output' agar tidak bentrok)
-    scraper_output = await scrapper.run_scraper_logic(target.id, target.nama_asli, target.keywords)
-    
-    # 2. Update status utama alumni
-    target.status = scraper_output['status']
-    target.confidence_score = scraper_output['score']
-    target.last_run = datetime.now()
-    
-    # 3. Simpan hasil ke AlumniTrackingResult
-    track_results = scraper_output.get('data', [])
-    
-    if track_results:
-        # OPSIONAL: Jika Anda ingin 1 record per platform (seperti kode awal Anda):
-        for res in track_results:
-            tracking_entry = models.AlumniTrackingResult(
-                target_id=target.id,
-                # Logika deteksi domain tetap aman
-                link_instagram=res['link'] if 'instagram.com' in res['link'] else None,
-                link_linkedin=res['link'] if 'linkedin.com' in res['link'] else None,
-                link_facebook=res['link'] if 'facebook.com' in res['link'] else None,
-                link_tiktok=res['link'] if 'tiktok.com' in res['link'] else None,
-                best_match_title=res['title'],
-                best_match_snippet=res['snippet'],
-                best_match_link=res['link'],
-                confidence_score=res['score']
-            )
-            db_session.add(tracking_entry)
 
-    # 4. Simpan ke database
+    if target.is_tracked:
+        return {"message": "Alumni sudah pernah ditrack", "id": target.id}
+
+    scraper_output = await scrapper.run_scraper_logic(target.id, target.nama)
+
+    track_results = scraper_output.get("data", [])
+
+    if track_results:
+        new_tracking_result = models.AlumniTrackingResult(target_id=target.id)
+
+        for res in track_results:
+            link = res.get("link", "").lower()
+
+            if "linkedin.com" in link:
+                new_tracking_result.link_linkedin = res["link"]
+
+                rich_data = res.get("rich_data", [])
+                posisi, tempat, alamat = parse_linkedin_rich_data(rich_data)
+
+                new_tracking_result.posisi_kerja = posisi
+                new_tracking_result.tempat_kerja = tempat
+                new_tracking_result.alamat_kerja = alamat
+
+            elif "instagram.com" in link:
+                new_tracking_result.link_instagram = res["link"]
+
+            elif "facebook.com" in link:
+                new_tracking_result.link_facebook = res["link"]
+
+            elif "tiktok.com" in link:
+                new_tracking_result.link_tiktok = res["link"]
+
+        db_session.add(new_tracking_result)
+
+    target.is_tracked = True
+
     db_session.commit()
     db_session.refresh(target)
-    
+
     return {
         "status": "success",
-        "current_status": target.status,
-        "score": target.confidence_score,
         "detail": {
-            "top_results": scraper_output.get('data'), # Mengambil list per platform
-            "best_match": scraper_output.get('best_match')
+            "top_results": scraper_output.get("data"),
+            "best_match": scraper_output.get("best_match")
         }
     }
 
 @app.post("/track-all")
 async def run_tracking_all(db_session: Session = Depends(db.get_db)):
-    # 1. Ambil semua alumni yang perlu di-track
-    targets = db_session.query(models.AlumniTarget).all()
-    
+    targets = db_session.query(models.Alumni).filter(models.Alumni.is_tracked == False).all()
+
     if not targets:
         return {"message": "Tidak ada data alumni untuk di-track"}
 
-    # 2. Gunakan Semaphore agar tidak membombardir API sekaligus (limit misal 5-10 concurrent)
-    sem = asyncio.Semaphore(5) 
-    results_summary = []
+    sem = asyncio.Semaphore(5)
 
     async def track_individual(target):
         async with sem:
-            # Gunakan logika yang sama dengan track satu orang
             try:
-                # Memanggil fungsi scraper logic langsung
-                scraper_output = await scrapper.run_scraper_logic(target.id, target.nama_asli, target.keywords)
-                
-                # Update status di DB
-                target.status = scraper_output['status']
-                target.confidence_score = scraper_output['score']
-                target.last_run = datetime.now()
+                scraper_output = await scrapper.run_scraper_logic(
+                    target.id,
+                    target.nama,
+                )
 
-                # Simpan bukti pencarian (Top 1 per platform)
-                track_results = scraper_output.get('data', [])
+                target.is_tracked = True
+
+                track_results = scraper_output.get("data", [])
+
+                tracking_entry = models.AlumniTrackingResult(
+                    target_id=target.id
+                )
+
                 for res in track_results:
-                    tracking_entry = models.AlumniTrackingResult(
-                        target_id=target.id,
-                        link_instagram=res['link'] if 'instagram.com' in res['link'] else None,
-                        link_linkedin=res['link'] if 'linkedin.com' in res['link'] else None,
-                        link_facebook=res['link'] if 'facebook.com' in res['link'] else None,
-                        link_tiktok=res['link'] if 'tiktok.com' in res['link'] else None,
-                        best_match_title=res['title'],
-                        best_match_snippet=res['snippet'],
-                        best_match_link=res['link'],
-                        confidence_score=res['score']
-                    )
-                    db_session.add(tracking_entry)
-                
+                    link = res.get("link", "").lower()
+
+                    if "linkedin.com" in link:
+                        tracking_entry.link_linkedin = res["link"]
+
+                        rich_data = res.get("rich_data", [])
+                        posisi, tempat, alamat = parse_linkedin_rich_data(rich_data)
+
+                        tracking_entry.posisi_kerja = posisi
+                        tracking_entry.tempat_kerja = tempat
+                        tracking_entry.alamat_kerja = alamat
+
+                    elif "instagram.com" in link:
+                        tracking_entry.link_instagram = res["link"]
+
+                    elif "facebook.com" in link:
+                        tracking_entry.link_facebook = res["link"]
+
+                    elif "tiktok.com" in link:
+                        tracking_entry.link_tiktok = res["link"]
+
+                db_session.add(tracking_entry)
+                print("\n--- Tracking Result ---")
+                print(f"Alumni: {target.nama}")
+
                 return {"id": target.id, "status": "processed"}
+
             except Exception as e:
                 return {"id": target.id, "status": f"failed: {str(e)}"}
 
-    # 3. Jalankan secara paralel dengan kontrol semaphore
     tasks = [track_individual(t) for t in targets]
     results_summary = await asyncio.gather(*tasks)
 
-    # 4. Commit semua perubahan sekaligus
     db_session.commit()
 
     return {
@@ -218,6 +233,21 @@ async def run_tracking_all(db_session: Session = Depends(db.get_db)):
         "total": len(targets),
         "summary": results_summary
     }
+
+def parse_linkedin_rich_data(rich_data: list):
+    posisi = None
+    tempat = None
+    alamat = None
+
+    if isinstance(rich_data, list):
+        if len(rich_data) > 0:
+            alamat = rich_data[0]
+        if len(rich_data) > 1:
+            posisi = rich_data[1]
+        if len(rich_data) > 2:
+            tempat = rich_data[2]
+
+    return posisi, tempat, alamat
 
 # @app.get("/track/{target_id}")
 # async def run_tracking(target_id: int, db_session: Session = Depends(db.get_db)):
@@ -401,4 +431,4 @@ async def start_tracking_all(db_session: Session = Depends(db.get_db)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)

@@ -23,6 +23,7 @@ async def fetch_data(query: str):
         "hl": "id",
         "gl": "id"
     }
+    data = {}
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -30,18 +31,33 @@ async def fetch_data(query: str):
             if response.status_code == 200:
                 data = response.json()
                 organic_results = data.get("organic_results", [])
-
-                for item in organic_results[:10]:  # ambil lebih banyak biar filtering gak kosong
+                for item in organic_results[:10]:
                     link = item.get("link", "")
                     if link:
+                        rich_data = []
+
+                        # ambil rich snippet hanya dari LinkedIn
+                        rich_data = None
+                        if "linkedin.com" in link.lower():
+                            rich_data = (
+                                item.get("rich_snippet", {})
+                                .get("top", {})
+                                .get("extensions", [])
+                            )
+
                         results.append({
                             "title": item.get("title", ""),
                             "snippet": item.get("snippet", ""),
-                            "link": link
+                            "link": link,
+                            "rich_data": rich_data,
                         })
+                        
     except Exception as e:
         print(f"Error fetch API: {e}")
-
+    print(f"results: {results}")
+    # print(f"Query: {query}")
+    # print(f"raw API data: {data}")
+    # print(f"original results: {organic_results}")
     return results
 
 
@@ -145,63 +161,3 @@ async def run_scraper_logic(target_id, target_nama, target_keywords=None):
         "best_match": best_match,
         "status": status
     }
-
-# async def run_scraper_logic(target_id, target_nama, target_keywords=None):
-#     """
-#     Fokus: cari kandidat akun medsos alumni (LinkedIn, IG, FB, TikTok).
-#     Output tetap sama: list top_results + best_match + score.
-#     """
-
-#     queries = [
-#         f'"{target_nama}" site:linkedin.com',
-#         f'"{target_nama}" site:instagram.com',
-#         f'"{target_nama}" site:facebook.com',
-#         f'"{target_nama}" site:tiktok.com'
-#     ]
-
-#     all_raw_results = []
-#     seen_links = set()
-
-#     for query in queries:
-#         keyword_results = await fetch_data(query)
-
-#         for res in keyword_results:
-#             if res["link"] not in seen_links and is_social_link(res["link"]):
-#                 seen_links.add(res["link"])
-#                 all_raw_results.append(res)
-
-#     scored_results = []
-#     target_profile = {"nama": target_nama}
-
-#     for candidate in all_raw_results:
-#         score = calculate_confidence(candidate, target_profile)
-#         scored_results.append({
-#             "title": candidate.get("title", ""),
-#             "snippet": candidate.get("snippet", ""),
-#             "link": candidate.get("link", ""),
-#             "score": score
-#         })
-
-#     scored_results.sort(key=lambda x: x["score"], reverse=True)
-
-#     top_results = scored_results[:5]
-#     highest_score = top_results[0]["score"] if top_results else 0.0
-#     best_match = top_results[0] if top_results else {
-#         "title": "",
-#         "snippet": "Data tidak ditemukan",
-#         "link": "",
-#         "score": 0.0
-#     }
-
-#     status = "UNTRACKED"
-#     if highest_score >= 0.8:
-#         status = "IDENTIFIED"
-#     elif highest_score >= 0.4:
-#         status = "MANUAL_VERIFICATION_REQUIRED"
-
-#     return {
-#         "score": highest_score,
-#         "data": top_results,
-#         "best_match": best_match,
-#         "status": status
-#     }
